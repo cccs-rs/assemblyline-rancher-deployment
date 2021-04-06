@@ -1,0 +1,81 @@
+# Tags for the containers used
+coreVersion: '4.0.stable'
+uiVersion: '4.0.stable'
+sapiVersion: '4.0.stable'
+
+# Storage classes for persistent data.
+redisStorageClass: longhorn-retain
+updateStorageClass: longhorn-retain
+persistantStorageClass: longhorn-retain
+
+internalLogging: true
+internalNFS: false
+loggingTLSVerify: "none"
+enableAPM: true
+
+
+coreEnv:
+  - name: GUNICORN_CMD_ARGS
+    value: "--workers=20"
+  - name: https_proxy
+    value: http://http-proxy.chi:3128
+  - name: no_proxy
+    value: "localhost,127.0.0.1,0.0.0.0,10.0.0.0/8,192.168.10.0/24,.svc,.cluster.local"
+
+configuration:
+  core:
+    scaler:
+      additional_labels: ["io.cattle.field/appId=assemblyline"]
+    metrics:
+      apm_server:
+        server_url: "http://apm:8200"
+  ui:
+    fqdn: "assemblyline-rancher.chi"
+  filestore:
+    cache: ["s3://${INTERNAL_FILESTORE_ACCESS}:${INTERNAL_FILESTORE_KEY}@assemblyline-filestore:9000?s3_bucket=al-cache&use_ssl=False"]
+    storage: ["s3://${INTERNAL_FILESTORE_ACCESS}:${INTERNAL_FILESTORE_KEY}@assemblyline-filestore:9000?s3_bucket=al-storage&use_ssl=False"]
+
+datastore:
+  volumeClaimTemplate:
+    storageClassName: longhorn-retain
+
+log-storage:
+  volumeClaimTemplate:
+    storageClassName: longhorn-retain
+
+filestore:
+  persistence:
+    storageClass: longhorn-retain
+  resources:
+    requests:
+      cpu: 100m
+      memory: 4Gi
+    limits:
+      cpu: 1000m
+      memory: 4Gi
+
+metricbeat:
+  daemonset:
+    resources:
+      limits:
+        memory: "500Mi"
+      
+#RANCHER DEPLOYMENT NOTES
+#Set limits for internal-ui, ui, service-server on 2000m and 4096Mi; env: GUNICORN_CMD_ARGS="--workers=20"
+#Updater permissions problem; fix: Add sidecar to change ownership of /mount/update_root from 99:99 to 1000:1000 using root
+#  - Can't reach external registry for service updates; Rancher is behind proxy, set in coreEnv:
+#        - name: https_proxy
+#          value: http://http-proxy.chi:3128
+#        - name: no_proxy
+#          value: '"localhost,127.0.0.1,0.0.0.0,10.0.0.0/8,192.168.10.0/24,.svc,.cluster.local"'
+#  - If Rancher is deployed behind proxy, details needs to be passed to signature sources
+#If AL is deployed using Rancher catalogs, you need to provide additional labels as a "=" delimited string list to configuration.core.scaler.additional_labels like 'io.cattle.field/appId=<namespace>'
+#Metricbeat memory limits need to be higher than the default in chart
+
+
+##Rancher tips
+#Add private registries before deployment of helm chart (UI: Secrets > Registry Credentials)
+#Can be deployed via helm install or Rancher UI using Catalogs/Apps
+#Update Longhorn to support RWX
+#Deploying AL on Rancher requires cluster admin privileges; upgrades can be done by standard user
+#If Rancher is deployed behind a proxy; pass https_proxy and no_proxy variables to coreEnv
