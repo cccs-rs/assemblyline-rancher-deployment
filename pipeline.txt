@@ -1,0 +1,72 @@
+  input {
+    beats {
+      port => 5044
+    }
+  }
+  filter {
+    mutate {
+      add_field => {
+        "[@metadata][target_index]" => "assemblyline-%{[@metadata][beat]}-%{[@metadata][version]}"
+      }
+      add_field => {
+        "[@metadata][index_name]" => "assemblyline_logs"
+      }
+    }
+    if "apm" in [kubernetes][labels][component] and [message] in ["queue is full", "service unavailable"]{
+      drop {}
+    }
+    if "gatekeeper-system" in [kubernetes][namespace] {
+      drop {}
+    }
+    # Enrichment rules
+    if "::" in [message] {
+      mutate {
+        replace => {
+          "[@metadata][index_name]" => "assemblyline_audits"
+        }
+      }
+      grok {
+        match => [ "message", "\A%{USERNAME:username} %{SYSLOG5424SD:classification} :: %{WORD:action}%{GREEDYDATA:params}"]
+      }
+      if "sid=" in [params] {
+        grok {
+          match => [ "params", "\A\(sid=%{WORD:submission}\)"]
+        }
+      }
+      if "sha256=" in [params] {
+        grok {
+          match => [ "params", "\A\(sid=%{WORD:submission}, sha256=%{WORD:subfile}\)"]
+        }
+      }
+    }
+    if "IP:" in [message] {
+      grok {
+        match => [ "message", "\A%{S3_REQUEST_LINE:action} \(U:%{USERNAME:username} - IP:%{IP:user_ip}\)%{GREEDYDATA}"]
+      }
+      geoip {
+        add_tag => [ "GeoIP" ]
+        source => "user_ip"
+      }
+    }
+    if "/api/v4/" in [message] {
+      grok{
+        match => [ "message", "\A%{SYSLOG5424SD} %{NOTSPACE} \[DEBUG] %{CRON_ACTION}/api/v4/%{WORD:api}%{GREEDYDATA}"]
+      }
+    }
+    if "beats_input_codec_plain_applied" in [tags] {
+      mutate {
+          remove_tag => ["beats_input_codec_plain_applied"]
+      }
+    }
+    mutate {
+      lowercase => ["username"]
+    }
+  }
+  output {
+    lumberjack {
+      codec => "json"
+      hosts => "logstash"
+      port => 5044
+      ssl_certificate =>  "/usr/share/logstash/certs/external-beats.crt"
+    }
+  }
